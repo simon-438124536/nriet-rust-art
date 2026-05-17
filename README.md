@@ -22,11 +22,11 @@ This repository is initialized for a staged rewrite of Py-ART-style workflows:
 
 ## Development
 
-Install Rust and Python first, then build the extension in editable mode:
+Install Rust and Python first, then build the extension into the active Python environment:
 
 ```powershell
 python -m pip install -U pip
-python -m pip install -e ".[dev]"
+python -m pip install maturin pytest
 maturin develop --release
 pytest
 ```
