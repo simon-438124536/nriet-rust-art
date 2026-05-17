@@ -1,0 +1,27 @@
+# Local reference sources and datasets
+pyart-main/
+pyart-main.zip
+闽侯对比用数据/
+
+# Rust
+/target/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyd
+*.so
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+build/
+dist/
+
+# IDE and OS noise
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

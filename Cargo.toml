@@ -1,0 +1,21 @@
+[package]
+name = "nriet-rust-art"
+version = "0.1.0"
+edition = "2021"
+description = "Rust-accelerated radar processing core with a thin Python package shell."
+repository = "https://github.com/simon-438124536/nriet-rust-art"
+publish = false
+
+[lib]
+name = "nriet_rust_art_core"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3 = { version = "0.28.3", features = ["extension-module"] }
+
+[profile.release]
+codegen-units = 1
+lto = "fat"
+opt-level = 3
+panic = "abort"
+strip = true
