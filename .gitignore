@@ -1,7 +1,12 @@
 # Local reference sources and datasets
 pyart-main/
 pyart-main.zip
+_oracle/
 闽侯对比用数据/
+
+# Build artifacts and local outputs
+dist/*.whl
+.tmp/
 
 # Rust
 /target/
