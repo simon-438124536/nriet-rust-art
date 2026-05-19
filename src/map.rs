@@ -1,7 +1,7 @@
 use ndarray::{ArrayView1, ArrayViewMut3, ArrayViewMut4};
 use numpy::{
-    PyReadonlyArray1, PyReadonlyArray2, PyReadonlyArray3, PyReadwriteArray2, PyReadwriteArray3,
-    PyReadwriteArray4, PyUntypedArrayMethods,
+    PyReadonlyArray1, PyReadonlyArray2, PyReadonlyArray3, PyReadwriteArray1, PyReadwriteArray2,
+    PyReadwriteArray3, PyReadwriteArray4, PyUntypedArrayMethods,
 };
 use pyo3::exceptions::{PyIndexError, PyValueError};
 use pyo3::prelude::*;
@@ -350,7 +350,107 @@ pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(py_gate_to_grid_map_gate, module)?)?;
     module.add_function(wrap_pyfunction!(py_gate_mapper_apply_field_f64, module)?)?;
     module.add_function(wrap_pyfunction!(py_gate_mapper_apply_field_f32, module)?)?;
+    module.add_function(wrap_pyfunction!(
+        py_gate_mapper_build_index_map_f64,
+        module
+    )?)?;
+    module.add_function(wrap_pyfunction!(
+        py_map_grid_select_nearest_row_f64,
+        module
+    )?)?;
     Ok(())
+}
+
+#[pyfunction(name = "_gate_mapper_build_index_map_f64")]
+#[allow(clippy::too_many_arguments)]
+pub fn py_gate_mapper_build_index_map_f64(
+    dists: PyReadonlyArray2<'_, f64>,
+    inds: PyReadonlyArray2<'_, i64>,
+    src_radar_time: PyReadonlyArray2<'_, f64>,
+    dest_radar_time: PyReadonlyArray1<'_, f64>,
+    mut index_map: PyReadwriteArray3<'_, f64>,
+    distance_tolerance: f64,
+    time_tolerance: f64,
+    tree_len: i64,
+) -> PyResult<()> {
+    if !dists.is_c_contiguous()
+        || !inds.is_c_contiguous()
+        || !src_radar_time.is_c_contiguous()
+        || !dest_radar_time.is_c_contiguous()
+        || !index_map.is_c_contiguous()
+    {
+        return Err(PyValueError::new_err("inputs must be C-contiguous"));
+    }
+    if tree_len < 1 {
+        return Err(PyValueError::new_err("tree_len must be at least 1"));
+    }
+    if !distance_tolerance.is_finite() || !time_tolerance.is_finite() {
+        return Err(PyValueError::new_err("tolerances must be finite"));
+    }
+
+    let dists = dists.as_array();
+    let inds = inds.as_array();
+    let src_radar_time = src_radar_time.as_array();
+    let dest_radar_time = dest_radar_time.as_array();
+    let mut index_map = index_map.as_array_mut();
+
+    if dists.dim() != inds.dim() || dists.dim() != src_radar_time.dim() {
+        return Err(PyValueError::new_err(
+            "dists, inds, and src_radar_time must share shape",
+        ));
+    }
+    if index_map.dim().2 != 2 {
+        return Err(PyValueError::new_err(
+            "index_map must have shape (.., .., 2)",
+        ));
+    }
+    if index_map.dim().0 != dists.dim().0 || index_map.dim().1 != dists.dim().1 {
+        return Err(PyValueError::new_err(
+            "index_map leading dimensions must match dists",
+        ));
+    }
+
+    let dest_ngates = dest_radar_time.len() as i64;
+    if dest_ngates <= 0 {
+        return Err(PyValueError::new_err("dest_radar_time must be non-empty"));
+    }
+
+    gate_mapper_build_index_map_f64(
+        dists,
+        inds,
+        src_radar_time,
+        dest_radar_time,
+        index_map.view_mut(),
+        distance_tolerance,
+        time_tolerance,
+        tree_len,
+        dest_ngates,
+    )
+}
+
+#[pyfunction(name = "_map_grid_select_nearest_row_f64")]
+pub fn py_map_grid_select_nearest_row_f64(
+    dist2: PyReadonlyArray1<'_, f64>,
+    nn_field_data: PyReadonlyArray2<'_, f64>,
+    mut out: PyReadwriteArray1<'_, f64>,
+) -> PyResult<()> {
+    if !dist2.is_c_contiguous() || !nn_field_data.is_c_contiguous() || !out.is_c_contiguous() {
+        return Err(PyValueError::new_err("inputs must be C-contiguous"));
+    }
+    let dist2 = dist2.as_array();
+    let nn_field_data = nn_field_data.as_array();
+    let mut out = out.as_array_mut();
+    if dist2.len() != nn_field_data.dim().0 {
+        return Err(PyValueError::new_err(
+            "dist2 length must match nn_field_data rows",
+        ));
+    }
+    if out.len() != nn_field_data.dim().1 {
+        return Err(PyValueError::new_err(
+            "out length must match nn_field_data columns",
+        ));
+    }
+    map_grid_select_nearest_row_f64(dist2, nn_field_data, out.view_mut())
 }
 
 fn gate_to_grid_find_min(a: f32, roi: f32, step: f32) -> i32 {
@@ -724,6 +824,73 @@ fn checked_gate_mapper_index(value: f64) -> PyResult<isize> {
     Ok(value as isize)
 }
 
+fn gate_mapper_build_index_map_f64(
+    dists: ndarray::ArrayView2<'_, f64>,
+    inds: ndarray::ArrayView2<'_, i64>,
+    src_radar_time: ndarray::ArrayView2<'_, f64>,
+    dest_radar_time: ndarray::ArrayView1<'_, f64>,
+    mut index_map: ndarray::ArrayViewMut3<'_, f64>,
+    distance_tolerance: f64,
+    time_tolerance: f64,
+    tree_len: i64,
+    dest_ngates: i64,
+) -> PyResult<()> {
+    let (nrays, ngates) = dists.dim();
+    for ray in 0..nrays {
+        for gate in 0..ngates {
+            let mut idx = *inds
+                .get((ray, gate))
+                .ok_or_else(|| PyValueError::new_err("inds index out of bounds"))?;
+            if idx == tree_len {
+                idx = tree_len - 1;
+            }
+            let mut keep = idx >= 0 && (idx as usize) < dest_radar_time.len();
+            if keep {
+                let time_delta =
+                    (src_radar_time[[ray, gate]] - dest_radar_time[idx as usize]).abs();
+                if time_delta >= time_tolerance || dists[[ray, gate]].abs() >= distance_tolerance {
+                    keep = false;
+                }
+            }
+            if !keep {
+                idx = -32_767;
+            }
+            let map_ray = (idx as f64 / dest_ngates as f64) as i64;
+            let map_gate = idx - dest_ngates * map_ray;
+            index_map[[ray, gate, 0]] = map_ray as f64;
+            index_map[[ray, gate, 1]] = map_gate as f64;
+        }
+    }
+    Ok(())
+}
+
+fn map_grid_select_nearest_row_f64(
+    dist2: ndarray::ArrayView1<'_, f64>,
+    nn_field_data: ndarray::ArrayView2<'_, f64>,
+    mut out: ndarray::ArrayViewMut1<'_, f64>,
+) -> PyResult<()> {
+    if dist2.is_empty() {
+        return Err(PyValueError::new_err("dist2 must be non-empty"));
+    }
+    let mut best_index = 0usize;
+    let mut best = dist2[0];
+    for (index, value) in dist2.iter().enumerate().skip(1) {
+        if *value < best {
+            best = *value;
+            best_index = index;
+        }
+    }
+    let row = nn_field_data
+        .row(best_index)
+        .into_iter()
+        .copied()
+        .collect::<Vec<_>>();
+    for (index, value) in row.into_iter().enumerate() {
+        out[index] = value;
+    }
+    Ok(())
+}
+
 fn gate_mapper_apply_field<T: Copy>(
     index_map: ndarray::ArrayView3<'_, f64>,
     src_data: ndarray::ArrayView2<'_, T>,
@@ -879,6 +1046,41 @@ mod tests {
         );
         assert_eq!(grid_sum[[0, 0, 0, 0]], 7.0);
         assert_eq!(grid_wsum[[0, 0, 0, 0]], 1.0);
+    }
+
+    #[test]
+    fn gate_mapper_build_index_map_matches_truncating_division() {
+        let dists = array![[10.0, 5.0], [3.0, 20.0]];
+        let inds = array![[7_i64, 4], [11, 11]];
+        let src_time = array![[1.0, 2.0], [3.0, 4.0]];
+        let dest_time = array![0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 11.0];
+        let mut index_map = ndarray::Array3::<f64>::from_elem((2, 2, 2), f64::NAN);
+        gate_mapper_build_index_map_f64(
+            dists.view(),
+            inds.view(),
+            src_time.view(),
+            dest_time.view(),
+            index_map.view_mut(),
+            100.0,
+            100.0,
+            12,
+            12,
+        )
+        .unwrap();
+        assert_eq!(index_map[[0, 0, 0]], 0.0);
+        assert_eq!(index_map[[0, 0, 1]], 7.0);
+        assert_eq!(index_map[[1, 1, 0]], 0.0);
+        assert_eq!(index_map[[1, 1, 1]], 11.0);
+    }
+
+    #[test]
+    fn map_grid_select_nearest_row_picks_first_tie() {
+        let dist2 = array![5.0, 2.0, 2.0, 9.0];
+        let nn = array![[1.0, 2.0], [3.0, 4.0], [9.0, 8.0], [0.0, 0.0],];
+        let mut out = array![0.0, 0.0];
+        map_grid_select_nearest_row_f64(dist2.view(), nn.view(), out.view_mut()).unwrap();
+        assert_eq!(out[0], 3.0);
+        assert_eq!(out[1], 4.0);
     }
 
     #[test]

@@ -180,25 +180,31 @@ class GateMapper:
         dists, inds = self._kdtree.query(
             new_points, distance_upper_bound=distance_tolerance
         )
-        inds[inds == len(self.dest_radar_time)] = (
-            inds[inds == len(self.dest_radar_time)] - 1
-        )
-        times = np.abs(self.src_radar_time - self.dest_radar_time[inds])
-        inds = np.where(
-            np.logical_and(
-                times < self._time_tolerance, np.abs(dists) < distance_tolerance
-            ),
-            inds[:],
-            -32767,
-        ).astype(int)
-        inds = np.reshape(inds, self.src_radar.gate_x["data"].shape)
+        if not _build_index_map_rust(
+            self,
+            dists,
+            inds,
+            distance_tolerance,
+        ):
+            inds[inds == len(self.dest_radar_time)] = (
+                inds[inds == len(self.dest_radar_time)] - 1
+            )
+            times = np.abs(self.src_radar_time - self.dest_radar_time[inds])
+            inds = np.where(
+                np.logical_and(
+                    times < self._time_tolerance, np.abs(dists) < distance_tolerance
+                ),
+                inds[:],
+                -32767,
+            ).astype(int)
+            inds = np.reshape(inds, self.src_radar.gate_x["data"].shape)
 
-        self._index_map[:, :, 0] = (
-            inds / self.dest_radar.gate_x["data"].shape[1]
-        ).astype(int)
-        self._index_map[:, :, 1] = inds - self.dest_radar.gate_x["data"].shape[1] * (
-            inds / self.dest_radar.gate_x["data"].shape[1]
-        ).astype(int)
+            self._index_map[:, :, 0] = (
+                inds / self.dest_radar.gate_x["data"].shape[1]
+            ).astype(int)
+            self._index_map[:, :, 1] = inds - self.dest_radar.gate_x["data"].shape[
+                1
+            ] * (inds / self.dest_radar.gate_x["data"].shape[1]).astype(int)
         self._distance_tolerance = distance_tolerance
 
     def mapped_radar(self, field_list):
@@ -303,6 +309,63 @@ def _rust_field_kernel_name(src_data, src_mask, out_data, out_mask, src_shape):
     ):
         return "_gate_mapper_apply_field_f32"
     return None
+
+
+def _build_index_map_rust(mapper, dists, inds, distance_tolerance):
+    kernel = _rust_kernel("_gate_mapper_build_index_map_f64")
+    if kernel is None:
+        return False
+    if np.issubdtype(inds.dtype, np.integer) and inds.dtype != np.int64:
+        inds = inds.astype(np.int64, copy=False)
+    if not _can_use_rust_index_map_build(
+        dists, inds, mapper.src_radar_time, mapper.dest_radar_time, mapper._index_map
+    ):
+        return False
+    try:
+        kernel(
+            dists,
+            inds,
+            mapper.src_radar_time,
+            mapper.dest_radar_time,
+            mapper._index_map,
+            float(distance_tolerance),
+            float(mapper._time_tolerance),
+            int(len(mapper.dest_radar_time)),
+        )
+    except (TypeError, ValueError, RuntimeError):
+        return False
+    return True
+
+
+def _can_use_rust_index_map_build(dists, inds, src_time, dest_time, index_map):
+    return (
+        type(dists) is np.ndarray
+        and type(inds) is np.ndarray
+        and type(src_time) is np.ndarray
+        and type(dest_time) is np.ndarray
+        and type(index_map) is np.ndarray
+        and dists.ndim == 2
+        and inds.ndim == 2
+        and src_time.ndim == 2
+        and dest_time.ndim == 1
+        and index_map.ndim == 3
+        and index_map.shape[2] == 2
+        and dists.shape == inds.shape == src_time.shape == index_map.shape[:2]
+        and dists.dtype == np.float64
+        and inds.dtype == np.int64
+        and src_time.dtype == np.float64
+        and dest_time.dtype == np.float64
+        and index_map.dtype == np.float64
+        and dists.flags.c_contiguous
+        and inds.flags.c_contiguous
+        and src_time.flags.c_contiguous
+        and dest_time.flags.c_contiguous
+        and index_map.flags.c_contiguous
+        and index_map.flags.writeable
+        and np.isfinite(dists).all()
+        and np.isfinite(src_time).all()
+        and np.isfinite(dest_time).all()
+    )
 
 
 def _rust_kernel(name):

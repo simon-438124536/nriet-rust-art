@@ -1098,10 +1098,11 @@ add rust fast path for phase_proc smooth_and_trim_scan
 - [x] source-tree `python -m pytest tests -q`（`test_native_extension` 需 installed `_rust` 时 skip/失败为已知）
 - [x] installed wheel `PYART_TEST_INSTALLED=1 python -m pytest tests -q` → **2626 passed**, 3 skipped（2026-05-19）
 - [x] `cargo fmt --check` 通过
-- [x] `cargo test -q` 通过（105）
+- [x] `cargo test -q` 通过（107，含 RSTM parser + GateMapper index_map + map_to_grid NEAREST row）
 - [x] RSTM Python reference 已冻结（`tools/rstm_reference.py`）
 - [x] RSTM Rust 与 Python reference 在 header preview + `build_reference_record` 上 exact parity
-- [ ] RSTM 全量 payload record layout parser（残余：逐字段业务解析仍待独立阶段）
+- [x] RSTM 逻辑文件 parser（`tools/rstm_parser.py` + `_rstm_parse_file_header` / `_rstm_parse_file` / `_rstm_parse_logical_payload`；冻结 256B 头 + 固定 stride ray 槽 + payload 前缀）
+- [ ] RSTM ray 内逐 gate 业务字段解码（CAP_FMT 物理量/标定块；当前仅槽位级 inventory）
 - [x] MinHou operational RSTM acceptance 通过（installed + `RSTM_DATA_ROOT`）
 - [x] benchmark harness 可运行（`benchmarks/run_slice_benchmark.py`）
 - [x] benchmark 可输出 JSON 计时（示例 slice：`smooth_and_trim_scan`）
@@ -1109,11 +1110,14 @@ add rust fast path for phase_proc smooth_and_trim_scan
 - [x] 外部 oracle/data 没有被提交
 - [x] 最终交接文档已更新
 
-残余风险（非阻塞 slice 迁移，但影响“全量 RSTM 业务解析”宣称）：
+残余风险（非阻塞 slice 迁移）：
 
-- RSTM 逐记录业务字段 parser 未移植
-- 完整 gridding / KDTree assignment 仍在 Python
+- RSTM ray 内逐 gate 业务字段解码未移植
+- `map_to_grid` 主循环（`query_ball`、CRESSMAN/BARNES 权重、Grid 元数据）仍在 Python；Rust 已覆盖 `GateMapper` KDTree 后的 `index_map` 构建与 NEAREST 行选取，以及既有 `gate_to_grid` / `_load_nn_field_data` 热点
+- SciPy `KDTree.query` 仍在 Python
 - Spark review 待补
+
+新增测试（installed 模式）：`tests/rstm/test_rstm_parser.py`、`tests/parity/test_gate_mapper_index_map.py`、`tests/parity/test_map_grid_nearest.py`
 
 ## 17. 最终交付建议
 

@@ -15,6 +15,7 @@ from ..core.grid import Grid
 from ..core.radar import Radar
 from ..core.transforms import geographic_to_cartesian
 from ..filters import GateFilter, moment_based_gate_filter
+from .._rust_bridge import get_rust_module
 from ..io.common import make_time_unit_str
 from ._load_nn_field_data import _load_nn_field_data
 from .ckdtree import cKDTree
@@ -714,7 +715,7 @@ def map_to_grid(
         r2 = r * r
 
         if weighting_function.upper() == "NEAREST":
-            value = nn_field_data[np.argmin(dist2)]
+            value = _select_nearest_grid_value(dist2, nn_field_data)
         else:
             if weighting_function.upper() == "CRESSMAN":
                 weights = (r2 - dist2) / (r2 + dist2)
@@ -1130,3 +1131,40 @@ def grid_rhi_sweeps(
             radar_ds = xr.concat((radar_ds, radar_ds_tmp), dim="azimuth")
 
     return radar_ds
+
+
+def _rust_kernel(name):
+    try:
+        rust = get_rust_module()
+    except ImportError:
+        return None
+    return getattr(rust, name, None)
+
+
+def _select_nearest_grid_value(dist2, nn_field_data):
+    kernel = _rust_kernel("_map_grid_select_nearest_row_f64")
+    if kernel is None or not _can_use_rust_nearest_row(dist2, nn_field_data):
+        return nn_field_data[np.argmin(dist2)]
+    out = np.empty(nn_field_data.shape[1], dtype=np.float64)
+    try:
+        kernel(dist2, nn_field_data, out)
+    except (TypeError, ValueError, RuntimeError):
+        return nn_field_data[np.argmin(dist2)]
+    return out
+
+
+def _can_use_rust_nearest_row(dist2, nn_field_data):
+    return (
+        type(dist2) is np.ndarray
+        and type(nn_field_data) is np.ndarray
+        and dist2.ndim == 1
+        and nn_field_data.ndim == 2
+        and dist2.dtype == np.float64
+        and nn_field_data.dtype == np.float64
+        and dist2.flags.c_contiguous
+        and nn_field_data.flags.c_contiguous
+        and dist2.shape[0] == nn_field_data.shape[0]
+        and dist2.size > 0
+        and np.isfinite(dist2).all()
+        and np.isfinite(nn_field_data).all()
+    )
