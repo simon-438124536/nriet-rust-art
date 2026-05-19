@@ -250,10 +250,6 @@ class GateMapper:
 
 
 def _apply_mapped_fields_rust(mapper, mapped_radar, src_fields, field_list):
-    kernel = _rust_kernel("_gate_mapper_apply_field_f64")
-    if kernel is None:
-        return False
-
     index_map = mapper._index_map
     if not _can_use_rust_index_map(
         index_map,
@@ -265,6 +261,7 @@ def _apply_mapped_fields_rust(mapper, mapped_radar, src_fields, field_list):
         return False
 
     prepared = []
+    kernel_name = None
     for field in field_list:
         src_data = np.ma.getdata(src_fields[field])
         src_mask = np.ma.getmaskarray(src_fields[field])
@@ -273,11 +270,20 @@ def _apply_mapped_fields_rust(mapper, mapped_radar, src_fields, field_list):
             return False
         out_data = dest.data
         out_mask = dest.mask
-        if not _can_use_rust_field_arrays(
+        field_kernel = _rust_field_kernel_name(
             src_data, src_mask, out_data, out_mask, index_map.shape[:2]
-        ):
+        )
+        if field_kernel is None:
+            return False
+        if kernel_name is None:
+            kernel_name = field_kernel
+        elif kernel_name != field_kernel:
             return False
         prepared.append((src_data, src_mask, out_data, out_mask))
+
+    kernel = _rust_kernel(kernel_name)
+    if kernel is None:
+        return False
 
     for src_data, src_mask, out_data, out_mask in prepared:
         try:
@@ -285,6 +291,18 @@ def _apply_mapped_fields_rust(mapper, mapped_radar, src_fields, field_list):
         except (TypeError, ValueError, RuntimeError):
             return False
     return True
+
+
+def _rust_field_kernel_name(src_data, src_mask, out_data, out_mask, src_shape):
+    if _can_use_rust_field_arrays(
+        src_data, src_mask, out_data, out_mask, src_shape, np.float64
+    ):
+        return "_gate_mapper_apply_field_f64"
+    if _can_use_rust_field_arrays(
+        src_data, src_mask, out_data, out_mask, src_shape, np.float32
+    ):
+        return "_gate_mapper_apply_field_f32"
+    return None
 
 
 def _rust_kernel(name):
@@ -322,7 +340,7 @@ def _can_use_rust_index_map(index_map, src_nrays, src_ngates, dest_nrays, dest_n
     )
 
 
-def _can_use_rust_field_arrays(src_data, src_mask, out_data, out_mask, src_shape):
+def _can_use_rust_field_arrays(src_data, src_mask, out_data, out_mask, src_shape, dtype):
     return (
         type(src_data) is np.ndarray
         and type(src_mask) is np.ndarray
@@ -331,9 +349,9 @@ def _can_use_rust_field_arrays(src_data, src_mask, out_data, out_mask, src_shape
         and src_data.shape == src_shape
         and src_mask.shape == src_shape
         and out_data.shape == out_mask.shape
-        and src_data.dtype == np.float64
+        and src_data.dtype == dtype
         and src_mask.dtype == np.bool_
-        and out_data.dtype == np.float64
+        and out_data.dtype == dtype
         and out_mask.dtype == np.bool_
         and src_data.flags.c_contiguous
         and src_mask.flags.c_contiguous

@@ -295,6 +295,25 @@ def test_real_rust_gate_mapper_apply_field_matches_python_oracle():
     os.environ.get("PYART_TEST_INSTALLED") != "1",
     reason="direct Rust parity is verified in installed-wheel mode",
 )
+def test_real_rust_gate_mapper_apply_field_f32_matches_python_fallback(monkeypatch):
+    import pyart._rust as rust
+
+    index_map = _index_map()
+    src = _source_data(dtype=np.float32)
+    mapper = _make_mapper(index_map=index_map, src=src, dest=_dest_data(dtype=np.float32))
+    expected = _fallback_mapped_data(mapper, monkeypatch)
+
+    actual = gate_mapper.GateMapper.mapped_radar(
+        mapper, "reflectivity"
+    ).fields["reflectivity"]["data"]
+
+    _assert_masked_array_exact(actual, expected)
+
+
+@pytest.mark.skipif(
+    os.environ.get("PYART_TEST_INSTALLED") != "1",
+    reason="direct Rust parity is verified in installed-wheel mode",
+)
 def test_real_rust_gate_mapper_apply_field_truncates_float_indexes_like_python_int():
     import pyart._rust as rust
 

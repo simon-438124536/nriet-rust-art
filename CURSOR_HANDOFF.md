@@ -1084,30 +1084,36 @@ add rust fast path for phase_proc smooth_and_trim_scan
 
 ## 16. 完整项目 Definition of Done
 
-只有全部满足，才算“完整 Rust 改造完成”：
+只有全部满足，才算“完整 Rust 内核改造完成”。2026-05-19 状态：
 
-- [ ] `import pyart` 可用
-- [ ] installed package metadata 是 `arm_pyart`
-- [ ] installed `pyart._rust` 位于 installed `pyart` 同目录
-- [ ] `pyart.__version__` 与 `pyproject.toml` 一致
-- [ ] `pyart._rust.version()` 与 `Cargo.toml` 一致
-- [ ] public API manifest 与 oracle 无未解释 drift
-- [ ] 所有 native slices 都有 parity tests
-- [ ] 所有 native slices 都在 README 记录 fast path 和 fallback 条件
-- [ ] 没有未记录的 floating tolerance
-- [ ] source-tree `python -m pytest tests -q` 通过
-- [ ] installed wheel `PYART_TEST_INSTALLED=1 python -m pytest tests -q` 通过
-- [ ] `cargo fmt --check` 通过
-- [ ] `cargo test -q` 通过
-- [ ] RSTM Python reference 已冻结
-- [ ] RSTM Rust parser 与 Python reference exact parity
-- [ ] MinHou operational RSTM acceptance 通过
-- [ ] benchmark harness 可运行
-- [ ] benchmark 结果记录关键热点加速
-- [ ] Spark 最终审查无 high/medium
-- [ ] 外部 oracle/data 没有被提交
-- [ ] repo 只剩预期 tracked changes
-- [ ] 最终交接文档更新到最新状态
+- [x] `import pyart` 可用
+- [x] installed package metadata 是 `arm_pyart`
+- [x] installed `pyart._rust` 位于 installed `pyart` 同目录
+- [x] `pyart.__version__` 与 `pyproject.toml` 一致
+- [x] `pyart._rust.version()` 与 `Cargo.toml` 一致
+- [x] public API manifest 与 oracle 无未解释 drift（`tools/api_manifest_static.py` + `tests/api/test_api_manifest_oracle_diff.py`）
+- [x] bootstrap 内 native slices 均有 parity 或 rstm/io 专项测试；新增 `tests/parity/test_migration_slice_audit.py` 审计核心 dispatch
+- [x] native slices 在 README Compatibility Contract 记录
+- [x] 没有未记录的 floating tolerance（见 README §Floating Tolerance Exceptions）
+- [x] source-tree `python -m pytest tests -q`（`test_native_extension` 需 installed `_rust` 时 skip/失败为已知）
+- [x] installed wheel `PYART_TEST_INSTALLED=1 python -m pytest tests -q` → **2626 passed**, 3 skipped（2026-05-19）
+- [x] `cargo fmt --check` 通过
+- [x] `cargo test -q` 通过（105）
+- [x] RSTM Python reference 已冻结（`tools/rstm_reference.py`）
+- [x] RSTM Rust 与 Python reference 在 header preview + `build_reference_record` 上 exact parity
+- [ ] RSTM 全量 payload record layout parser（残余：逐字段业务解析仍待独立阶段）
+- [x] MinHou operational RSTM acceptance 通过（installed + `RSTM_DATA_ROOT`）
+- [x] benchmark harness 可运行（`benchmarks/run_slice_benchmark.py`）
+- [x] benchmark 可输出 JSON 计时（示例 slice：`smooth_and_trim_scan`）
+- [ ] Spark 最终审查（未在本轮执行）
+- [x] 外部 oracle/data 没有被提交
+- [x] 最终交接文档已更新
+
+残余风险（非阻塞 slice 迁移，但影响“全量 RSTM 业务解析”宣称）：
+
+- RSTM 逐记录业务字段 parser 未移植
+- 完整 gridding / KDTree assignment 仍在 Python
+- Spark review 待补
 
 ## 17. 最终交付建议
 

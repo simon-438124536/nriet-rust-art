@@ -2,7 +2,7 @@ use flate2::read::GzDecoder;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::{PyAny, PyDict};
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{Read, Take};
 use std::path::Path;
 
@@ -38,8 +38,48 @@ fn py_rstm_header_preview<'py>(
     Ok(out)
 }
 
+#[pyfunction(name = "_rstm_build_reference_record")]
+#[pyo3(signature = (path, header_bytes = DEFAULT_HEADER_BYTES as isize))]
+fn py_rstm_build_reference_record<'py>(
+    py: Python<'py>,
+    path: &Bound<'_, PyAny>,
+    header_bytes: isize,
+) -> PyResult<Bound<'py, PyDict>> {
+    if header_bytes < 0 {
+        return Err(PyValueError::new_err("header_bytes must be non-negative"));
+    }
+
+    let os = py.import("os")?;
+    let fspath = os.call_method1("fspath", (path,))?;
+    let path_string: String = fspath.extract()?;
+    let record = build_reference_record(Path::new(&path_string), header_bytes as usize)?;
+
+    let header_preview = PyDict::new(py);
+    header_preview.set_item("length_bytes", record.header_preview.length_bytes)?;
+    header_preview.set_item("hex", record.header_preview.hex)?;
+    header_preview.set_item("ascii", record.header_preview.ascii)?;
+
+    let out = PyDict::new(py);
+    out.set_item("schema_version", "rstm-reference-v1")?;
+    out.set_item("path", record.path)?;
+    out.set_item("size_bytes", record.size_bytes)?;
+    out.set_item(
+        "compression",
+        if record.gzip_detected_by_magic {
+            "gzip"
+        } else {
+            "none"
+        },
+    )?;
+    out.set_item("gzip_detected_by_magic", record.gzip_detected_by_magic)?;
+    out.set_item("raw_magic_hex", record.raw_magic_hex)?;
+    out.set_item("header_preview", header_preview)?;
+    Ok(out)
+}
+
 pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(py_rstm_header_preview, module)?)?;
+    module.add_function(wrap_pyfunction!(py_rstm_build_reference_record, module)?)?;
     Ok(())
 }
 
@@ -53,6 +93,30 @@ struct HeaderPreviewRecord {
     gzip_detected_by_magic: bool,
     raw_magic_hex: String,
     header_preview: HeaderPreview,
+}
+
+struct ReferenceRecord {
+    path: String,
+    size_bytes: u64,
+    gzip_detected_by_magic: bool,
+    raw_magic_hex: String,
+    header_preview: HeaderPreview,
+}
+
+fn build_reference_record(path: &Path, header_bytes: usize) -> PyResult<ReferenceRecord> {
+    let metadata = fs::metadata(path)?;
+    let preview_record = build_header_preview_record(path, header_bytes)?;
+    Ok(ReferenceRecord {
+        path: path_to_lossy_string(path),
+        size_bytes: metadata.len(),
+        gzip_detected_by_magic: preview_record.gzip_detected_by_magic,
+        raw_magic_hex: preview_record.raw_magic_hex,
+        header_preview: preview_record.header_preview,
+    })
+}
+
+fn path_to_lossy_string(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
 }
 
 fn build_header_preview_record(path: &Path, header_bytes: usize) -> PyResult<HeaderPreviewRecord> {

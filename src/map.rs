@@ -291,7 +291,47 @@ pub fn py_gate_mapper_apply_field_f64(
         out_data.view(),
         out_mask.view(),
     )?;
-    gate_mapper_apply_field_f64(
+    gate_mapper_apply_field(
+        index_map,
+        src_data,
+        src_mask,
+        out_data.view_mut(),
+        out_mask.view_mut(),
+    )
+}
+
+#[pyfunction(name = "_gate_mapper_apply_field_f32")]
+pub fn py_gate_mapper_apply_field_f32(
+    index_map: PyReadonlyArray3<'_, f64>,
+    src_data: PyReadonlyArray2<'_, f32>,
+    src_mask: PyReadonlyArray2<'_, bool>,
+    mut out_data: PyReadwriteArray2<'_, f32>,
+    mut out_mask: PyReadwriteArray2<'_, bool>,
+) -> PyResult<()> {
+    if !index_map.is_c_contiguous()
+        || !src_data.is_c_contiguous()
+        || !src_mask.is_c_contiguous()
+        || !out_data.is_c_contiguous()
+        || !out_mask.is_c_contiguous()
+    {
+        return Err(PyValueError::new_err(
+            "index_map, source arrays, and output arrays must be C-contiguous",
+        ));
+    }
+
+    let index_map = index_map.as_array();
+    let src_data = src_data.as_array();
+    let src_mask = src_mask.as_array();
+    let mut out_data = out_data.as_array_mut();
+    let mut out_mask = out_mask.as_array_mut();
+    validate_gate_mapper_inputs_f32(
+        index_map,
+        src_data.view(),
+        src_mask.view(),
+        out_data.view(),
+        out_mask.view(),
+    )?;
+    gate_mapper_apply_field(
         index_map,
         src_data,
         src_mask,
@@ -309,6 +349,7 @@ pub(crate) fn register(module: &Bound<'_, PyModule>) -> PyResult<()> {
     module.add_function(wrap_pyfunction!(py_gate_to_grid_roi_dist_beam_f32, module)?)?;
     module.add_function(wrap_pyfunction!(py_gate_to_grid_map_gate, module)?)?;
     module.add_function(wrap_pyfunction!(py_gate_mapper_apply_field_f64, module)?)?;
+    module.add_function(wrap_pyfunction!(py_gate_mapper_apply_field_f32, module)?)?;
     Ok(())
 }
 
@@ -592,6 +633,35 @@ fn gate_to_grid_map_gate(
     1
 }
 
+fn validate_gate_mapper_inputs_f32(
+    index_map: ndarray::ArrayView3<'_, f64>,
+    src_data: ndarray::ArrayView2<'_, f32>,
+    src_mask: ndarray::ArrayView2<'_, bool>,
+    out_data: ndarray::ArrayView2<'_, f32>,
+    out_mask: ndarray::ArrayView2<'_, bool>,
+) -> PyResult<()> {
+    let src_shape = src_data.dim();
+    if index_map.dim() != (src_shape.0, src_shape.1, 2) {
+        return Err(PyValueError::new_err(
+            "index_map must have shape (src_nrays, src_ngates, 2)",
+        ));
+    }
+    if src_mask.dim() != src_shape {
+        return Err(PyValueError::new_err(
+            "src_data and src_mask must have the same shape",
+        ));
+    }
+    if out_data.dim() != out_mask.dim() {
+        return Err(PyValueError::new_err(
+            "out_data and out_mask must have the same shape",
+        ));
+    }
+    if !index_map.iter().all(|value| value.is_finite()) {
+        return Err(PyValueError::new_err("index_map values must be finite"));
+    }
+    validate_gate_mapper_indices(index_map, out_data.dim())
+}
+
 fn validate_gate_mapper_inputs(
     index_map: ndarray::ArrayView3<'_, f64>,
     src_data: ndarray::ArrayView2<'_, f64>,
@@ -654,11 +724,11 @@ fn checked_gate_mapper_index(value: f64) -> PyResult<isize> {
     Ok(value as isize)
 }
 
-fn gate_mapper_apply_field_f64(
+fn gate_mapper_apply_field<T: Copy>(
     index_map: ndarray::ArrayView3<'_, f64>,
-    src_data: ndarray::ArrayView2<'_, f64>,
+    src_data: ndarray::ArrayView2<'_, T>,
     src_mask: ndarray::ArrayView2<'_, bool>,
-    mut out_data: ndarray::ArrayViewMut2<'_, f64>,
+    mut out_data: ndarray::ArrayViewMut2<'_, T>,
     mut out_mask: ndarray::ArrayViewMut2<'_, bool>,
 ) -> PyResult<()> {
     let (src_nrays, src_ngates) = src_data.dim();
@@ -825,7 +895,7 @@ mod tests {
                 .unwrap();
         let mut out_mask = ndarray::Array2::<bool>::from_elem((3, 3), true);
 
-        gate_mapper_apply_field_f64(
+        gate_mapper_apply_field(
             index_map.view(),
             src_data.view(),
             src_mask.view(),

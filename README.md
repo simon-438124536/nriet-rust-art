@@ -346,11 +346,15 @@ after all edge values are computed, leaving NaNs unchanged. Other dtypes,
 short arrays, multidimensional arrays, and noncontiguous views remain
 Python-owned.
 
-`map.GateMapper.mapped_radar` has an exact private helper for the inner
-float64 field assignment loop. Python still owns Radar copying, field-list
-normalization, field metadata, target masked-array construction, and source
-mask merging with `gatefilter_src.gate_excluded`. Rust only handles finite,
-dense, C-contiguous `float64` index maps with shape
+`pyart._rust._rstm_build_reference_record` matches the frozen Python
+`tools.rstm_reference.build_reference_record` surface for gzip magic detection,
+on-disk size, compression label, raw magic hex, and logical header preview.
+
+`map.GateMapper.mapped_radar` has exact private helpers for the inner
+float64 and float32 field assignment loops. Python still owns Radar copying,
+field-list normalization, field metadata, target masked-array construction,
+and source mask merging with `gatefilter_src.gate_excluded`. Rust only handles
+finite, dense, C-contiguous `float64` or `float32` index maps with shape
 `(src_nrays, src_ngates, 2)`, dense source data/mask arrays, and writable
 float64 destination data plus bool masks. It preserves row-major source-gate
 order, later duplicate overwrites, destination ray `0` skip behavior, and
@@ -575,7 +579,8 @@ python -m pytest tests\rstm\test_minhou_operational.py -q
 - `correct.attenuation` PhiDP preparation, end-gate mask scan, and default-parameter table kernels
 - `correct.phase_proc` masked degree unwrap, 1-D/2-D dense smoothing, freezing-level, and system-phase kernels
 - `filters.GateFilter` mask merge plus threshold/interval/finite compare-merge kernels
-- `map.GateMapper` dense float64 field-assignment kernel
+- `map.GateMapper` dense float64 and float32 field-assignment kernels
+- `pyart._rust._rstm_build_reference_record` byte-level reference record helper
 - `retrieve.echo_class` no-entropy scan classifier, ATWT, wavelet threshold labels, radial mask, feature classification, scalar core scheme, frequency-band, standardization, and feature-radius kernels
 - `retrieve.cfad` dense frequency-table normalization helper
 - `retrieve.qpe` default coefficient table plus Z-poly, Z power-law, KDP power-law, attenuation power-law, and Z/KDP or Z/A threshold-blend kernels
@@ -631,8 +636,9 @@ names, with parity tests added before replacing behavior.
 
 ## Verification Results (2026-05-19)
 
-Recorded on branch `rust-kernel-full-rewrite` after bootstrap baseline and
-`smooth_and_trim_scan` native slice. Re-run these gates after further changes.
+Recorded on branch `rust-kernel-full-rewrite` after P1–P10 plan execution
+(API manifest static diff, GateMapper f32, RSTM reference record, parity
+audits). Re-run these gates after further changes.
 
 | Gate | Command | Result |
 |------|---------|--------|
@@ -640,9 +646,9 @@ Recorded on branch `rust-kernel-full-rewrite` after bootstrap baseline and
 | Rust tests | `cargo test -q` | 105 passed |
 | Source pytest | `python -m pytest tests -q` | 1635 passed, 980 skipped, 2 failed\* |
 | Wheel | `maturin build --release --out dist` | `dist\arm_pyart-0.1.0-cp312-cp312-win_amd64.whl` |
-| Installed pytest | `PYART_TEST_INSTALLED=1 python -m pytest tests -q` | 2614 passed, 3 skipped |
-| RSTM installed | `RSTM_DATA_ROOT=...\闽侯对比用数据` + installed pytest | 2617 passed |
-| RSTM only | `python -m pytest tests\rstm -q` | 9 passed, 4 skipped |
+| Installed pytest | `PYART_TEST_INSTALLED=1 python -m pytest tests -q` | 2626 passed, 3 skipped |
+| API manifest | `pytest tests/api/test_api_manifest_oracle_diff.py -q` | 2 passed |
+| RSTM only | `python -m pytest tests\rstm -q` | 10 passed, 4 skipped |
 
 \* Source-tree failures are `tests/test_native_extension.py` (require installed
 `pyart._rust`); they pass in installed mode.

@@ -21,6 +21,18 @@ def _rust_rstm_header_preview():
     return fn
 
 
+def _rust_rstm_build_reference_record():
+    if importlib.util.find_spec("pyart._rust") is None:
+        pytest.skip("pyart._rust is not installed")
+
+    import pyart._rust as rust
+
+    fn = getattr(rust, "_rstm_build_reference_record", None)
+    if fn is None:
+        pytest.skip("pyart._rust has not registered _rstm_build_reference_record yet")
+    return fn
+
+
 def _reference_key_fields(path: Path, header_bytes: int) -> dict[str, object]:
     record = build_reference_record(path, header_bytes=header_bytes)
     return {
@@ -55,6 +67,26 @@ def test_rust_rstm_header_preview_accepts_pathlike_objects(tmp_path):
     path.write_bytes(b"RSTM pathlike")
 
     assert rust_header_preview(path, 4) == _reference_key_fields(path, 4)
+
+
+def test_rust_rstm_build_reference_record_matches_python_reference(tmp_path):
+    rust_build = _rust_rstm_build_reference_record()
+
+    plain = tmp_path / "plain.rstm"
+    plain.write_bytes(b"RSTM\x00plain\npayload")
+
+    gzip_named = tmp_path / "compressed.rstm"
+    gzip_named.write_bytes(gzip.compress(b"RSTM-HEADER-1234567890", mtime=0))
+
+    for path in (plain, gzip_named):
+        expected = build_reference_record(path, header_bytes=32)
+        actual = rust_build(str(path), 32)
+        assert actual["schema_version"] == expected["schema_version"]
+        assert actual["gzip_detected_by_magic"] == expected["gzip_detected_by_magic"]
+        assert actual["raw_magic_hex"] == expected["raw_magic_hex"]
+        assert actual["compression"] == expected["compression"]
+        assert actual["size_bytes"] == expected["size_bytes"]
+        assert actual["header_preview"] == expected["header_preview"]
 
 
 def test_rust_rstm_header_preview_rejects_negative_header_bytes(tmp_path):
