@@ -636,9 +636,13 @@ Recorded on branch `rust-kernel-full-rewrite` after bootstrap baseline and
 
 | Gate | Command | Result |
 |------|---------|--------|
-| Rust format | `cargo fmt --check` | see CI log below |
-| Rust tests | `cargo test -q` | see CI log below |
-| Source pytest | `python -m pytest tests -q` | see CI log below |
-| Wheel | `maturin build --release --out dist` | see CI log below |
-| Installed pytest | `PYART_TEST_INSTALLED=1 python -m pytest tests -q` | see CI log below |
-| RSTM | `RSTM_DATA_ROOT=...\闽侯对比用数据` + installed pytest | see CI log below |
+| Rust format | `cargo fmt --check` | pass |
+| Rust tests | `cargo test -q` | 105 passed |
+| Source pytest | `python -m pytest tests -q` | 1635 passed, 980 skipped, 2 failed\* |
+| Wheel | `maturin build --release --out dist` | `dist\arm_pyart-0.1.0-cp312-cp312-win_amd64.whl` |
+| Installed pytest | `PYART_TEST_INSTALLED=1 python -m pytest tests -q` | 2614 passed, 3 skipped |
+| RSTM installed | `RSTM_DATA_ROOT=...\闽侯对比用数据` + installed pytest | 2617 passed |
+| RSTM only | `python -m pytest tests\rstm -q` | 9 passed, 4 skipped |
+
+\* Source-tree failures are `tests/test_native_extension.py` (require installed
+`pyart._rust`); they pass in installed mode.

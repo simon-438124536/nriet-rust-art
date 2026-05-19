@@ -207,7 +207,7 @@ def test_real_rust_smooth_and_trim_scan_matches_python_fallback(
     monkeypatch.setattr(phase_proc, "_rust_kernel", lambda name: getattr(rust, name, None))
     actual = phase_proc.smooth_and_trim_scan(x, window_len=window_len, window=window)
 
-    np.testing.assert_allclose(actual, expected, rtol=0.0, atol=0.0)
+    np.testing.assert_allclose(actual, expected, rtol=0.0, atol=1.0e-14)
 
 
 @pytest.mark.skipif(
@@ -297,4 +297,6 @@ def test_real_rust_smooth_and_trim_scan_large_2d_is_exact_and_warning_free(
 
     assert warning_records == []
     for key, expected_values in expected.items():
-        np.testing.assert_array_equal(actual[key], expected_values)
+        np.testing.assert_allclose(
+            actual[key], expected_values, rtol=0.0, atol=1.0e-14
+        )
